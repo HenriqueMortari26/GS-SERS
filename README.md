@@ -10,8 +10,8 @@
 | **Opção Técnica** | Opção A — Análise de Dados |
 
 ## 1. Identificação da Equipa
-* **Membro 1:** [SEU NOME COMPLETO] | **RM:** [SEU RM]
-* **Membro 2:** [NOME DO COLEGA] | **RM:** [RM DO COLEGA]
+* **Membro 1:** HENRIQUE NICOLAS MORTARI | **RM:** 564699
+* **Membro 2:** VICTOR NICOLAS MORTARI | **RM:** 564804
 
 ---
 
@@ -85,3 +85,4 @@ Esta seção detalha como o projeto está organizado no GitHub e como executá-l
     python main.py
     ```
 O script exibirá o relatório no console e salvará o gráfico de análise (`grafico_analise.png`) na pasta do projeto.
+

@@ -1,0 +1,8 @@
+dia,consumo_kwh,pessoas_presentes,ar_condicionado_ligado
+Segunda,450,50,Sim
+Terca,480,55,Sim
+Quarta,460,52,Sim
+Quinta,420,30,Sim
+Sexta,400,10,Sim
+Sabado,150,2,Nao
+Domingo,140,0,Nao

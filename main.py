@@ -1,138 +1,146 @@
+import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
+import plotly.express as px
+import plotly.graph_objects as go
+import numpy as np
 
-# --- CONFIGURAÇÃO ---
-# Total de funcionários da empresa (para cálculo comparativo)
-TOTAL_FUNCIONARIOS = 60 
+# --- CONFIGURAÇÃO E CARREGAMENTO DE DADOS ---
+st.set_page_config(layout="wide", page_title="EcoWork Analytics - Dashboard Energético")
 
-def carregar_dados():
-    """Carrega os ficheiros CSV para DataFrames."""
+# Variáveis de Custo e Economia
+CUSTO_POR_KWH = 0.75 
+POTENCIAL_ECONOMIA_PERCENTUAL = 0.15 
+
+# Função de Carregamento de Dados (Garante que os dados só carregam uma vez)
+@st.cache_data
+def load_data(file_path):
+    """Carrega e preprocessa o dataset."""
     try:
-        df_office = pd.read_csv('data/dados_escritorio.csv')
-        df_remote = pd.read_csv('data/dados_homeoffice.csv')
-        return df_office, df_remote
+        df = pd.read_csv(file_path)
+        df['Data'] = pd.to_datetime(df['Data'])
+        df = df.set_index('Data')
+        return df
     except FileNotFoundError:
-        print("Erro: Ficheiros .csv não encontrados. Verifica o nome e a pasta.")
-        return None, None
+        st.error(f"Erro: O ficheiro '{file_path}' não foi encontrado. Execute o 'data_generator.py' primeiro.")
+        return pd.DataFrame()
 
-def analisar_eficiencia(df_office, custo_kwh_remoto, ocupacao_maxima=60):
-    """
-    Analisa se compensa manter o escritório aberto baseando-se na ocupação.
-    Lógica melhorada:
-    - Calcula consumo base proporcional à ocupação máxima
-    - Compara consumo per capita realista
-    - ocupacao_maxima: máxima ocupação esperada (padrão: 60 pessoas)
-    """
-    print("\n--- RELATÓRIO DE EFICIÊNCIA ENERGÉTICA ---")
+df = load_data('consumo_anual_eletrodomesticos.csv')
+
+if df.empty:
+    st.stop()
     
-    recomendacoes = []
+# --- 1. VISÃO GERAL E GANHOS ---
+
+st.title("🌱 EcoWork Analytics: Otimização Energética Doméstica")
+st.header("Análise de Consumo Anual")
+st.markdown("---")
+
+col1, col2, col3, col4 = st.columns(4)
+
+# Cálculos Totais
+consumo_total_anual = df['Consumo_Total_kWh'].sum()
+custo_total_anual = consumo_total_anual * CUSTO_POR_KWH
+economia_potencial = custo_total_anual * POTENCIAL_ECONOMIA_PERCENTUAL
+
+col1.metric("Consumo Total (1 Ano)", f"{consumo_total_anual:,.0f} kWh")
+col2.metric("Custo Total Estimado", f"R$ {custo_total_anual:,.2f}")
+col3.metric("Economia Potencial (15%)", f"R$ {economia_potencial:,.2f}")
+col4.metric("Dias Analisados", f"{len(df)} dias")
+
+
+# --- 2. ANÁLISE DE SÉRIES TEMPORAIS (Histórico, Sazonalidade e Picos) ---
+
+st.header("Histórico de Consumo (Sazonalidade e Picos)")
+
+# Identificação de Picos (Outliers) - Requisito 3
+media = df['Consumo_Total_kWh'].mean()
+desvio_padrao = df['Consumo_Total_kWh'].std()
+LIMIAR_PICO = media + 2 * desvio_padrao
+
+picos_df = df[df['Consumo_Total_kWh'] > LIMIAR_PICO].copy()
+
+# Gráfico de Linha do Histórico Total
+fig_hist = px.line(df, 
+                   y='Consumo_Total_kWh', 
+                   title='Consumo Total Diário ao Longo do Ano',
+                   height=400)
+
+# Adicionar os picos ao gráfico para visualização
+if not picos_df.empty:
+    # Adicionando uma linha horizontal para referência do limiar
+    fig_hist.add_hline(y=LIMIAR_PICO, line_dash="dash", line_color="orange", annotation_text="Limiar de Pico")
     
-    # Consumo base: proporcional à ocupação (mantém infraestrutura ligada)
-    # Estimativa: ~1.33 kWh por pessoa (luzes, ar mínimo, sistemas)
-    consumo_base_por_pessoa = 1.33
+    fig_hist.add_trace(go.Scatter(x=picos_df.index, y=picos_df['Consumo_Total_kWh'],
+                                  mode='markers', name='Pico Anormal',
+                                  marker=dict(color='red', size=8)))
+
+st.plotly_chart(fig_hist, use_container_width=True)
+
+# Análise Sazonal (Agrupamento Mensal) - Requisito 4
+consumo_mensal = df['Consumo_Total_kWh'].resample('M').mean().reset_index()
+consumo_mensal['Mes'] = consumo_mensal['Data'].dt.strftime('%b/%y')
+
+fig_sazonal = px.bar(consumo_mensal, x='Mes', y='Consumo_Total_kWh',
+                     title='Média de Consumo Mensal (Variação Sazonal)',
+                     text_auto='.2f',
+                     height=350)
+st.plotly_chart(fig_sazonal, use_container_width=True)
+
+
+# --- 3. SEGMENTAÇÃO POR EQUIPAMENTO E PICO DIÁRIO ---
+
+st.header("Consumo Segmentado por Equipamento")
+
+col5, col6 = st.columns([1, 1.5])
+
+# Consumo de cada equipamento (Gráfico de Pizza) - Requisito 5
+equipamentos_colunas = ['PC_HomeOffice_kWh', 'Chuveiro_kWh', 'ArCondicionado_kWh', 'Geladeira_kWh', 'Outros_kWh']
+equipamentos_consumo = df[equipamentos_colunas].sum()
+equipamentos_consumo_df = equipamentos_consumo.reset_index()
+equipamentos_consumo_df.columns = ['Equipamento', 'Consumo (kWh)']
+
+fig_pizza = px.pie(equipamentos_consumo_df, values='Consumo (kWh)', names='Equipamento',
+                   title='Participação Percentual no Consumo Anual',
+                   hole=.3)
+col5.plotly_chart(fig_pizza, use_container_width=True)
+
+
+# Sugestões de Otimização (Requisito 7)
+col6.subheader("Sugestões de Otimização por Horário (Segmentação)")
+
+# Lógica de Sugestão Horária (Baseada na simulação de consumo do chuveiro)
+pico_chuveiro_diario = df['Chuveiro_kWh'].mean()
+
+if pico_chuveiro_diario > 4.5: 
+    col6.markdown(f"""
+    **Ação:** Evitar o uso do Chuveiro/Aquecedor das **19:00h às 21:00h** (Horário de Pico da Residência).
     
-    for index, row in df_office.iterrows():
-        dia = row['dia']
-        consumo_office = row['consumo_kwh']
-        ocupacao = row['pessoas_presentes']
-        ar_ligado = row['ar_condicionado_ligado']
-        
-        if ocupacao == 0:
-            # Escritório fechado - consumo deveria ser próximo de 0
-            status = "FECHADO"
-            if consumo_office > 10:  # Apenas alert se ainda consome muito
-                print(f"{dia}: Consumo: {consumo_office}kWh | Ocupação: {ocupacao} | Status: {status} ⚠️ Consumo anormal!")
-            else:
-                print(f"{dia}: Consumo: {consumo_office}kWh | Ocupação: {ocupacao} | Status: {status}")
-            continue
-        
-        # Consumo base esperado para essa ocupação
-        consumo_base_esperado = ocupacao * consumo_base_por_pessoa
-        
-        # Consumo variável (além da infraestrutura)
-        consumo_variavel = consumo_office - consumo_base_esperado
-        consumo_per_capita_office = consumo_variavel / ocupacao if consumo_variavel > 0 else consumo_base_por_pessoa
-        
-        # Custo esperado se esses funcionários trabalhassem em casa
-        # Nota: remoto não precisa de ar condicionado central, apenas equipamento
-        consumo_remoto_por_pessoa = 1.2  # notebook (0.4) + monitor (0.3) + luz (0.1) + internet (0.1) + ar residencial compartilhado (0.3)
-        
-        # Margem de tolerância: 25% acima do remoto é aceitável
-        limite_aceitavel = consumo_remoto_por_pessoa * 1.25
-        
-        # Verificar ineficiência
-        if consumo_per_capita_office > limite_aceitavel:
-            status = "INEFICIENTE ⚠️"
-            recomendacoes.append(
-                f"ALERTA: Na {dia}, consumo per capita ({consumo_per_capita_office:.2f}kWh) "
-                f"excede limite aceitável ({limite_aceitavel:.2f}kWh) com {ocupacao} pessoas. AR: {ar_ligado}"
-            )
-        else:
-            status = "OK"
-            
-        print(f"{dia}: {consumo_office:3.0f}kWh | Per Capita: {consumo_per_capita_office:.2f}kWh | Ocupação: {ocupacao:2.0f} | AR: {ar_ligado:3s} | Status: {status}")
+    * **Justificativa:** O consumo médio do chuveiro é elevado ({pico_chuveiro_diario:.2f} kWh/dia) e concentrado no início da noite, contribuindo para o maior pico de demanda.
+    * **Impacto:** Distribuir este consumo para horários de menor demanda (após as 21:00h ou pela manhã) reduz o custo operacional e a sobrecarga.
+    """)
+    # Adicionar sugestão para AC
+    ac_medio = df['ArCondicionado_kWh'].mean()
+    if ac_medio > 1.0:
+         col6.markdown(f"**Sugestão Secundária:** Se o uso do AC ({ac_medio:.2f} kWh/dia) é alto, programe-o para desligar 30 minutos antes de sair de casa, aproveitando a inércia térmica.")
+else:
+    col6.success("O uso de Chuveiro está eficiente. Focar na redução de outros aparelhos.")
 
-    return recomendacoes
+# --- 4. ECONOMIA RETROATIVA (Requisito 6) ---
 
-def gerar_graficos(df_office):
-    """Gera visualização dos dados para o relatório."""
-    plt.figure(figsize=(10, 6))
-    
-    # Gráfico de Barras: Consumo vs Ocupação
-    dias = df_office['dia']
-    consumo = df_office['consumo_kwh']
-    ocupacao = df_office['pessoas_presentes']
+st.header("Simulação de Economia Retroativa")
+st.markdown("---")
 
-    fig, ax1 = plt.subplots(figsize=(10,6))
+# Calcular economia se 50% dos picos tivessem sido evitados
+if not picos_df.empty:
+    economia_picos = (picos_df['Consumo_Total_kWh'] - LIMIAR_PICO).sum() * 0.5 * CUSTO_POR_KWH
 
-    color = 'tab:blue'
-    ax1.set_xlabel('Dia da Semana')
-    ax1.set_ylabel('Consumo (kWh)', color=color)
-    ax1.bar(dias, consumo, color=color, alpha=0.6, label='Energia (kWh)')
-    ax1.tick_params(axis='y', labelcolor=color)
+    st.markdown(f"""
+    Se você tivesse ajustado o uso nos **{len(picos_df)} dias de pico** identificados, 
+    reduzindo o excesso de consumo em 50%, a economia retroativa seria de **R$ {economia_picos:,.2f}** no último ano. 
+    Isto demonstra o potencial de otimização da sua rotina.
+    """)
+else:
+    st.info("Nenhuma economia retroativa calculada, pois não foram identificados picos anormais nos dados.")
 
-    ax2 = ax1.twinx()  # Segundo eixo y para ocupação
-    color = 'tab:red'
-    ax2.set_ylabel('Pessoas Presentes', color=color)
-    ax2.plot(dias, ocupacao, color=color, marker='o', linestyle='-', linewidth=2, label='Ocupação')
-    ax2.tick_params(axis='y', labelcolor=color)
-
-    plt.title('Análise de Sustentabilidade: Consumo Energético vs Ocupação')
-    fig.tight_layout()
-    plt.grid(True, axis='x')
-    
-    # Salvar o gráfico
-    plt.savefig('grafico_analise.png')
-    print("\nGráfico 'grafico_analise.png' gerado com sucesso!")
-    plt.show()
-
-def main():
-    print("Iniciando EcoWork Analytics...")
-    df_office, df_remote = carregar_dados()
-    
-    if df_office is not None:
-        # 1. Calcular consumo médio de uma pessoa em casa
-        # Equipamentos em home office: Notebook (0.4) + Monitor (0.3) + Luz (0.1) + Internet (0.1) = 0.9 kWh/dia
-        # Ar residencial compartilhado aprox 0.3 kWh = total 1.2 kWh/dia
-        consumo_pessoa_remoto = 1.2
-        
-        print(f"Consumo estimado por funcionário em Home Office: {consumo_pessoa_remoto:.2f} kWh/dia")
-        print(f"Ocupação máxima esperada: {TOTAL_FUNCIONARIOS} pessoas\n")
-        
-        # 2. Executar Análise
-        recomendacoes = analisar_eficiencia(df_office, consumo_pessoa_remoto, ocupacao_maxima=TOTAL_FUNCIONARIOS)
-        
-        # 3. Mostrar Recomendações
-        print("\n--- RECOMENDAÇÕES DE SUSTENTABILIDADE ---")
-        if recomendacoes:
-            for rec in recomendacoes:
-                print(rec)
-            print("\nSUGESTÃO FINAL: Implementar Home Office seletivo nos dias com alertas reduz significativamente custos energéticos.")
-        else:
-            print("O uso energético do escritório está otimizado para a ocupação atual.")
-            
-        # 4. Gerar Gráfico
-        gerar_graficos(df_office)
-
-if __name__ == "__main__":
-    main()
+# Comando para execução
+# st.code('streamlit run main.py')
